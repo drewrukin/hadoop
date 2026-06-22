@@ -598,7 +598,9 @@ public class WebHdfsFileSystem extends FileSystem
     InetSocketAddress nnAddr = getCurrentNNAddr();
     final URL url = new URL(getTransportScheme(), nnAddr.getHostName(),
         nnAddr.getPort(), path + '?' + query);
-    LOG.trace("url={}", url);
+    if (LOG.isTraceEnabled()) {
+      LOG.trace("url={}", getMaskedUrlForLog(url));
+    }
     return url;
   }
 
@@ -640,7 +642,9 @@ public class WebHdfsFileSystem extends FileSystem
         + Param.toSortedString("&", getAuthParameters(op))
         + Param.toSortedString("&", parameters);
     final URL url = getNamenodeURL(path, query);
-    LOG.trace("url={}", url);
+    if (LOG.isTraceEnabled()) {
+      LOG.trace("url={}", getMaskedUrlForLog(url));
+    }
     return url;
   }
 
@@ -1686,6 +1690,52 @@ public class WebHdfsFileSystem extends FileSystem
   }
 
   private static final String OFFSET_PARAM_PREFIX = OffsetParam.NAME + "=";
+  private static final String LOG_MASKED_PARAM_VALUE = "XXXXX";
+  private static final String[] LOG_MASKED_PARAM_PREFIXES = {
+      DelegationParam.NAME + "=",
+      TokenArgumentParam.NAME + "="
+  };
+
+  @VisibleForTesting
+  static String getMaskedUrlForLog(final URL url) {
+    final String query = url.getQuery();
+    if (query == null) {
+      return url.toString();
+    }
+    final String lower = StringUtils.toLowerCase(query);
+    boolean mask = false;
+    for (String prefix : LOG_MASKED_PARAM_PREFIXES) {
+      if (lower.startsWith(prefix) || lower.contains("&" + prefix)) {
+        mask = true;
+        break;
+      }
+    }
+    if (!mask) {
+      return url.toString();
+    }
+
+    final StringBuilder b = new StringBuilder("?");
+    for (final StringTokenizer st = new StringTokenizer(query, "&");
+        st.hasMoreTokens();) {
+      if (b.length() > 1) {
+        b.append('&');
+      }
+      b.append(maskQueryTokenForLog(st.nextToken()));
+    }
+
+    final String urlStr = url.toString();
+    return urlStr.substring(0, urlStr.indexOf('?')) + b;
+  }
+
+  private static String maskQueryTokenForLog(final String token) {
+    final String lower = StringUtils.toLowerCase(token);
+    for (String prefix : LOG_MASKED_PARAM_PREFIXES) {
+      if (lower.startsWith(prefix) && token.length() > prefix.length()) {
+        return token.substring(0, prefix.length()) + LOG_MASKED_PARAM_VALUE;
+      }
+    }
+    return token;
+  }
 
   /** Remove offset parameter, if there is any, from the url */
   static URL removeOffsetParam(final URL url) throws MalformedURLException {
@@ -2622,7 +2672,7 @@ public class WebHdfsFileSystem extends FileSystem
       final String cl = conn.getHeaderField(HttpHeaders.CONTENT_LENGTH);
       InputStream inStream = conn.getInputStream();
       if (LOG.isDebugEnabled()) {
-        LOG.debug("open file: " + conn.getURL());
+        LOG.debug("open file: {}", getMaskedUrlForLog(conn.getURL()));
       }
       if (cl != null) {
         long streamLength = Long.parseLong(cl);
